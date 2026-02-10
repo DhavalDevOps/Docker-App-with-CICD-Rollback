@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Commit SHA to deploy (rollback supported)"
-        required: true
+        description: "Commit SHA to deploy / rollback (leave empty to use latest)"
+        required: false
 
 env:
   REGISTRY: ghcr.io
@@ -24,13 +24,17 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
 
+    outputs:
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set SHA
+      - name: Get Commit SHAs
+        id: sha
         run: | 
-            echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-            echo "FULL_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+            echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+            echo "full_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - name: Login to GHCR
         run: |
@@ -40,23 +44,27 @@ jobs:
       - name: Build Image
         run: |
           docker build \
-            -t $REGISTRY/$IMAGE_NAME:$SHA \
-            -t $REGISTRY/$IMAGE_NAME:$FULL_SHA \
+            -t $REGISTRY/$IMAGE_NAME:${{ steps.sha.outputs.short_sha }} \
+            -t $REGISTRY/$IMAGE_NAME:${{ steps.sha.outputs.full_sha }} \
             -t $REGISTRY/$IMAGE_NAME:latest \
             .
 
       - name: Push Image
         run: |
-          docker push $REGISTRY/$IMAGE_NAME:$SHA
-          docker push $REGISTRY/$IMAGE_NAME:$FULL_SHA
+          docker push $REGISTRY/$IMAGE_NAME:${{ steps.sha.outputs.short_sha }}
+          docker push $REGISTRY/$IMAGE_NAME:${{ steps.sha.outputs.full_sha }}
           docker push $REGISTRY/$IMAGE_NAME:latest
 
   deploy:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag != '')
 
+    environment:
+      name: production
+    
     steps:
-      - name: Deploy / Rollback
+      - name: Auto Deploy with Approval
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_IP }}
