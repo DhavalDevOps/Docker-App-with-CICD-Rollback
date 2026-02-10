@@ -64,12 +64,14 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             set -e
+
             APP_DIR="/opt/sample-rollback-app"
             IMAGE="ghcr.io/dhavaldevops/docker-app-with-ci-cd-rollback"
             STATE_FILE="$APP_DIR/state/last_good_image"
             NEW_TAG="${{ github.event.inputs.image_tag }}"
 
             cd $APP_DIR
+
             echo "Logging into GHCR..."
             echo "${{ secrets.USER_GITHUB_TOKEN }}" | \
             docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
@@ -84,6 +86,7 @@ jobs:
             sleep 10
 
             CONTAINER_ID=$(docker ps -qf "name=sample-app")
+            FAILED=0
 
             if [ -z "$CONTAINER_ID" ]; then
                 echo "❌ Container failed to start"
@@ -93,15 +96,20 @@ jobs:
                 if [ "$HEALTH" != "healthy" ]; then
                     echo "❌ Container unhealthy: $HEALTH"
                     FAILED=1
-                else
-                    FAILED=0
                 fi
             fi
 
             if [ "$FAILED" = "1" ]; then
                 echo "🔁 Rolling back..."
+
+                if [ ! -s "$STATE_FILE" ]; then
+                    echo "🚨 No last good image found. Manual intervention required."
+                    exit 1
+                fi
+
                 LAST_GOOD=$(cat $STATE_FILE)
 
+                echo "Rolling back to $LAST_GOOD"
                 IMAGE_TAG=$LAST_GOOD docker compose down
                 IMAGE_TAG=$LAST_GOOD docker compose up -d
 
