@@ -1,10 +1,10 @@
 const express = require("express");
 const app = express();
 
-const VERSION = "v3";
+const VERSION = "v2";
 
 app.get("/", (req, res) => {
-  res.send(`Hello from Sample App 🌐 Version: ${VERSION}`);
+  res.send(`Hello from Sample App 🔥 Version: ${VERSION}`);
 });
 
 app.get("/health", (req, res) => {
