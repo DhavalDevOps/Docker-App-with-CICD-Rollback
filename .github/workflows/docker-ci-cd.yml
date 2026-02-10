@@ -76,54 +76,62 @@ jobs:
             APP_DIR="/opt/sample-rollback-app"
             IMAGE="ghcr.io/dhavaldevops/docker-app-with-ci-cd-rollback"
             STATE_FILE="$APP_DIR/state/last_good_image"
-            NEW_TAG="${{ github.event.inputs.image_tag }}"
-
+            
             cd $APP_DIR
 
             echo "Logging into GHCR..."
             echo "${{ secrets.USER_GITHUB_TOKEN }}" | \
             docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
 
-            echo "Deploying new image: $IMAGE:$NEW_TAG"
-            docker pull $IMAGE:$NEW_TAG
+            if [ "${{ github.event_name }}" = "push" ]; then
+                NEW_TAG="${{ needs.build.outputs.short_sha }}"
+                echo "Push event → deploying latest build: $NEW_TAG"
+            else
+                NEW_TAG="${{ github.event.inputs.image_tag }}"
+                if [ -z "$NEW_TAG" ]; then
+                    NEW_TAG="latest"
+                fi
+                echo "Manual deploy → deploying tag: $NEW_TAG"
+            fi
 
-            echo "Starting new deployment..."
-            IMAGE_TAG=$NEW_TAG docker compose up -d --remove-orphans
-
+            # Health check (polling)
             echo "Waiting for health check..."
-            sleep 25
+            MAX_WAIT=60
+            WAITED=0
+            INTERVAL=5
 
             CONTAINER_ID=$(docker ps -qf "name=sample-rollback-app")
-            FAILED=0
 
-            if [ -z "$CONTAINER_ID" ]; then
-                echo "❌ Container failed to start"
-                FAILED=1
-            else
+            while [ $WAITED -lt $MAX_WAIT ]; do
                 HEALTH=$(docker inspect --format='{{.State.Health.Status}}' $CONTAINER_ID)
-                if [ "$HEALTH" != "healthy" ]; then
-                    echo "❌ Container unhealthy: $HEALTH"
-                    FAILED=1
-                fi
-            fi
+                echo "Health: $HEALTH"
 
-            if [ "$FAILED" = "1" ]; then
-                echo "🔁 Rolling back..."
-
-                if [ ! -s "$STATE_FILE" ]; then
-                    echo "🚨 No last good image found. Manual intervention required."
-                    exit 1
-                fi
-
-                LAST_GOOD=$(cat $STATE_FILE)
-
-                echo "Rolling back to $LAST_GOOD"
-                IMAGE_TAG=$LAST_GOOD docker compose down
-                IMAGE_TAG=$LAST_GOOD docker compose up -d
-
-                echo "Rollback complete → $LAST_GOOD"
-                exit 1
-            else
+                if [ "$HEALTH" = "healthy" ]; then
                 echo "✅ Deployment successful"
                 echo "$NEW_TAG" > $STATE_FILE
+                exit 0
+                fi
+
+                if [ "$HEALTH" = "unhealthy" ]; then
+                    break
+                fi
+
+                sleep $INTERVAL
+                WAITED=$((WAITED + INTERVAL))
+            done
+
+            #### Rollback Logic ####
+            echo "❌ Deployment failed → rolling back"
+
+            if [ ! -s "$STATE_FILE" ]; then
+                echo "🚨 No last good image found"
+                exit 1
             fi
+
+            LAST_GOOD=$(cat $STATE_FILE)
+            echo "Rolling back to $LAST_GOOD"
+
+            IMAGE_TAG=$LAST_GOOD docker compose down
+            IMAGE_TAG=$LAST_GOOD docker compose up -d
+
+            exit 0
