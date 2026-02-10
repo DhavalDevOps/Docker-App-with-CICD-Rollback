@@ -58,7 +58,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag != '')
+    if: github.event_name == 'push'
 
     environment:
       name: production
@@ -140,3 +140,34 @@ jobs:
             IMAGE_TAG=$LAST_GOOD docker compose up -d
 
             exit 0
+
+  deploy_manual:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Manual Deploy / Rollback
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+
+                    APP_DIR="/opt/sample-rollback-app"
+                    IMAGE="ghcr.io/dhavaldevops/docker-app-with-ci-cd-rollback"
+                    STATE_FILE="$APP_DIR/state/last_good_image"
+                    TAG="${{ github.event.inputs.image_tag }}"
+
+                    cd $APP_DIR
+
+                    echo "${{ secrets.USER_GITHUB_TOKEN }}" | \
+                    docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+
+                    docker pull $IMAGE:$TAG
+                    IMAGE_TAG=$TAG docker compose down
+                    IMAGE_TAG=$TAG docker compose up -d
+
+                    echo "$TAG" > $STATE_FILE
+                    echo "✅ Deployed $IMAGE:$TAG"
