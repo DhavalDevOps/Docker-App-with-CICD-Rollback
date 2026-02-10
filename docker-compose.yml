@@ -1,0 +1,7 @@
+services:
+  app:
+    image: ghcr.io/dhavaldevops/docker-app-with-ci-cd-rollback:${IMAGE_TAG}
+    container_name: sample-rollback-app
+    ports:
+      - "3000:3000"
+    restart: always

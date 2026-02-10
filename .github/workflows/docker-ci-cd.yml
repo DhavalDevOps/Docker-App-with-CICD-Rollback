@@ -1,0 +1,78 @@
+name: Docker CI-CD Rollback Demo
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Commit SHA to deploy (rollback supported)"
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: dhavaldevops/docker-app-with-ci-cd-rollback
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set SHA
+        run: | 
+            echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+            echo "FULL_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.USER_GITHUB_TOKEN }}" | \
+          docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build Image
+        run: |
+          docker build \
+            -t $REGISTRY/$IMAGE_NAME:$SHA \
+            -t $REGISTRY/$IMAGE_NAME:$FULL_SHA \
+            -t $REGISTRY/$IMAGE_NAME:latest \
+            .
+
+      - name: Push Image
+        run: |
+          docker push $REGISTRY/$IMAGE_NAME:$SHA
+          docker push $REGISTRY/$IMAGE_NAME:$FULL_SHA
+          docker push $REGISTRY/$IMAGE_NAME:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Deploy / Rollback
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/sample-rollback-app
+
+            echo "${{ secrets.USER_GITHUB_TOKEN }}" | \
+            docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+
+            IMAGE_TAG=${{ github.event.inputs.image_tag }}
+
+            echo "Deploying image tag: $IMAGE_TAG"
+
+            docker pull ghcr.io/dhavaldevops/docker-app-with-ci-cd-rollback:$IMAGE_TAG
+            docker compose down
+            IMAGE_TAG=$IMAGE_TAG docker compose up -d
