@@ -64,15 +64,50 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             set -e
-            cd /opt/sample-rollback-app
+            APP_DIR="/opt/sample-rollback-app"
+            IMAGE="ghcr.io/dhavaldevops/docker-app-with-ci-cd-rollback"
+            STATE_FILE="$APP_DIR/state/last_good_image"
+            NEW_TAG="${{ github.event.inputs.image_tag }}"
 
+            cd $APP_DIR
+            echo "Logging into GHCR..."
             echo "${{ secrets.USER_GITHUB_TOKEN }}" | \
             docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
 
-            IMAGE_TAG=${{ github.event.inputs.image_tag }}
+            echo "Deploying new image: $IMAGE:$NEW_TAG"
+            docker pull $IMAGE:$NEW_TAG
 
-            echo "Deploying image tag: $IMAGE_TAG"
+            echo "Starting new deployment..."
+            IMAGE_TAG=$NEW_TAG docker compose up -d --remove-orphans
 
-            docker pull ghcr.io/dhavaldevops/docker-app-with-ci-cd-rollback:$IMAGE_TAG
-            docker compose down
-            IMAGE_TAG=$IMAGE_TAG docker compose up -d
+            echo "Waiting for health check..."
+            sleep 10
+
+            CONTAINER_ID=$(docker ps -qf "name=sample-app")
+
+            if [ -z "$CONTAINER_ID" ]; then
+                echo "❌ Container failed to start"
+                FAILED=1
+            else
+                HEALTH=$(docker inspect --format='{{.State.Health.Status}}' $CONTAINER_ID)
+                if [ "$HEALTH" != "healthy" ]; then
+                    echo "❌ Container unhealthy: $HEALTH"
+                    FAILED=1
+                else
+                    FAILED=0
+                fi
+            fi
+
+            if [ "$FAILED" = "1" ]; then
+                echo "🔁 Rolling back..."
+                LAST_GOOD=$(cat $STATE_FILE)
+
+                IMAGE_TAG=$LAST_GOOD docker compose down
+                IMAGE_TAG=$LAST_GOOD docker compose up -d
+
+                echo "Rollback complete → $LAST_GOOD"
+                exit 1
+            else
+                echo "✅ Deployment successful"
+                echo "$NEW_TAG" > $STATE_FILE
+            fi
