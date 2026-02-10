@@ -85,7 +85,7 @@ jobs:
             echo "Waiting for health check..."
             sleep 25
 
-            CONTAINER_ID=$(docker ps -qf "name=sample-app")
+            CONTAINER_ID=$(docker ps -qf "name=sample-rollback-app")
             FAILED=0
 
             if [ -z "$CONTAINER_ID" ]; then
