@@ -94,6 +94,11 @@ jobs:
                 echo "Manual deploy → deploying tag: $NEW_TAG"
             fi
 
+            # Deploy new image
+            echo "Deploying image: $IMAGE:$NEW_TAG"
+            docker pull $IMAGE:$NEW_TAG
+            IMAGE_TAG=$NEW_TAG docker compose up -d --remove-orphans
+
             # Health check (polling)
             echo "Waiting for health check..."
             MAX_WAIT=60
