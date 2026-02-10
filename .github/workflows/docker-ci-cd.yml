@@ -83,7 +83,7 @@ jobs:
             IMAGE_TAG=$NEW_TAG docker compose up -d --remove-orphans
 
             echo "Waiting for health check..."
-            sleep 10
+            sleep 25
 
             CONTAINER_ID=$(docker ps -qf "name=sample-app")
             FAILED=0
